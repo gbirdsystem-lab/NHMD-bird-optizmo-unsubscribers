@@ -1,8 +1,8 @@
 name: SFTP File Reader
 
 on:
-  schedule:
-    - cron: "0 */3 * * *"
+  # schedule:
+  #   - cron: "0 */3 * * *"
   workflow_dispatch:
 
 concurrency:
