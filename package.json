@@ -1,0 +1,20 @@
+{
+    "name": "sftp-file-reader",
+    "version": "1.0.0",
+    "description": "Connects to SFTP server, reads new files and logs their contents. Runs locally and via GitHub Actions cron.",
+    "type": "module",
+    "main": "sftp_reader.js",
+    "scripts": {
+        "start": "node sftp_reader.js",
+        "dev": "node sftp_reader.js",
+        "send": "node send_optout.js"
+    },
+    "dependencies": {
+        "ssh2-sftp-client": "^10.0.3",
+        "dotenv": "^16.4.5"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "license": "MIT"
+}
