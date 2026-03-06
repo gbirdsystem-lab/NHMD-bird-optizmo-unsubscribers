@@ -1,0 +1,96 @@
+name: SFTP File Reader
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sftp-reader
+  cancel-in-progress: false
+
+jobs:
+  read-sftp-files:
+    name: Read new SFTP files
+    runs-on: ubuntu-latest
+    timeout-minutes: 160
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull latest state files
+        run: git pull origin ${{ github.ref_name }}
+
+      - name: Show current state
+        run: |
+          echo "=== processed_files.json ==="
+          cat processed_files.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Processed files count: {len(d)}')" || echo "File empty or missing"
+          echo "=== sent_emails.json ==="
+          cat sent_emails.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Sent emails count: {len(d)}')" || echo "File empty or missing"
+
+      - name: Run SFTP reader
+        env:
+          SFTP_HOST: ${{ secrets.SFTP_HOST }}
+          SFTP_PORT: ${{ secrets.SFTP_PORT }}
+          SFTP_USER: ${{ secrets.SFTP_USER }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_REMOTE_DIR: ${{ secrets.SFTP_REMOTE_DIR }}
+          OPTOUT_API_KEY: ${{ secrets.OPTOUT_API_KEY }}
+          OPTOUT_LIST_ID: ${{ secrets.OPTOUT_LIST_ID }}
+        run: node sftp_reader.js
+
+      - name: Save state files to repository
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          MAX_RETRIES=5
+          RETRY=0
+          until [ $RETRY -ge $MAX_RETRIES ]; do
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git add processed_files.json sent_emails.json collected_emails.txt
+            if git diff --staged --quiet; then
+              echo "No state changes to commit."
+              break
+            fi
+            git commit -m "chore: update state files [skip ci]" && \
+            git push origin ${{ github.ref_name }} && \
+            echo "State saved successfully." && \
+            break
+            RETRY=$((RETRY+1))
+            echo "Push failed, retrying ($RETRY/$MAX_RETRIES)..."
+            sleep $((RETRY * 3))
+          done
+
+      - name: Upload state backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-backup-${{ github.run_number }}
+          path: |
+            processed_files.json
+            sent_emails.json
+            collected_emails.txt
+          retention-days: 30
+
+      - name: Report failure summary
+        if: failure()
+        run: |
+          echo "::error::SFTP reader failed! Check logs above."
+          cat processed_files.json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Processed count at failure: {len(d)}')" || echo "Unknown"
